@@ -1,2 +1,2 @@
 # WebGl Example
-This project is a demonstration for webGL displaying a basic cube with lighting.
+This project is a demonstration for WebGL displaying a basic cube with lighting.
