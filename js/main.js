@@ -1,25 +1,50 @@
-var cubeRotation = 0.0;
-
-const canvas = document.querySelector("#canvas");
 window.onload = main;
+
+let canvas = document.querySelector("#canvas");
+
+canvas.width = document.body.clientWidth;
+canvas.height = window.innerHeight;
+let gl = canvas.getContext("webgl2");
+let aspect = canvas.width / canvas.height;
 
 let mouseX = canvas.clientWidth / 2,
     mouseY = canvas.clientHeight / 2;
-window.onmousemove = function (event) {
-    mouseX = 2 * event.clientX / canvas.clientWidth;
-    mouseY = 2 * event.clientY / canvas.clientHeight;
+let lastX = 0, lastY = 0;
+
+let cubeRotation = 0.0;
+let THETA = 0, PHI = 0;
+let SENSITIVITY = 0.6;
+
+
+window.onresize = function () {
+    canvas.width = document.body.clientWidth;
+    canvas.height = window.innerHeight;
+    gl = canvas.getContext("webgl2");
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    aspect = canvas.width / canvas.height;
+}
+
+window.onmousemove = function (e) {
+    mouseX = 2 * e.clientX / canvas.clientWidth;
+    mouseY = 2 * e.clientY / canvas.clientHeight;
+    let dX = (e.pageX - lastX) * 2 * Math.PI / canvas.width;
+    let dY = (e.pageY - lastY) * 2 * Math.PI / canvas.height;
+    THETA += dX * SENSITIVITY;
+    PHI -= dY * SENSITIVITY;
+    lastX = e.pageX;
+    lastY = e.pageY;
+    e.preventDefault();
 }
 
 function main() {
-    const gl = canvas.getContext("webgl");
-
     if (gl === null) {
         return;
     }
+
     gl.clearColor(0, 0, 0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     console.log("initialize complete");
-
 
     const program = initShader(gl, vsSource, fsSource);
     const programInfo = {
@@ -27,10 +52,12 @@ function main() {
         attribLocations: {
             vertexPosition: gl.getAttribLocation(program, "aVertexPosition"),
             vertexColor: gl.getAttribLocation(program, "aVertexColor"),
+            normal: gl.getAttribLocation(program, "aNormal"),
         },
         uniformLocations: {
             projectionMatrix: gl.getUniformLocation(program, 'uProjectionMatrix'),
             viewMatrix: gl.getUniformLocation(program, 'uModelViewMatrix'),
+            cameraPos: gl.getUniformLocation(program, 'cameraPos'),
         }
     };
 
@@ -42,10 +69,11 @@ function main() {
         const deltaTime = now - then;
         then = now;
 
-        draw(gl, programInfo, buffer,deltaTime);
+        draw(gl, programInfo, buffer, deltaTime);
 
         requestAnimationFrame(render);
     }
+
     requestAnimationFrame(render);
 }
 
@@ -106,9 +134,46 @@ function initBuffers(gl) {
         20, 21, 22, 20, 22, 23,   // left
     ];
 
+    const normals = [
+        // Front
+        0.0, 0.0, 1.0,
+        0.0, 0.0, 1.0,
+        0.0, 0.0, 1.0,
+        0.0, 0.0, 1.0,
+
+        // Back
+        0.0, 0.0, -1.0,
+        0.0, 0.0, -1.0,
+        0.0, 0.0, -1.0,
+        0.0, 0.0, -1.0,
+
+        // Top
+        0.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 1.0, 0.0,
+
+        // Bottom
+        0.0, -1.0, 0.0,
+        0.0, -1.0, 0.0,
+        0.0, -1.0, 0.0,
+        0.0, -1.0, 0.0,
+
+        // Right
+        1.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+        1.0, 0.0, 0.0,
+
+        // Left
+        -1.0, 0.0, 0.0,
+        -1.0, 0.0, 0.0,
+        -1.0, 0.0, 0.0,
+        -1.0, 0.0, 0.0
+    ];
+
     var colors = [];
     for (var j = 0; j < faceColors.length; ++j) {
-
         const c = faceColors[j];
         // Repeat each color four times for the four vertices of the face
         colors = colors.concat(c, c, c, c);
@@ -122,6 +187,10 @@ function initBuffers(gl) {
     gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
 
+    const normalBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
     const indexBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
@@ -130,6 +199,7 @@ function initBuffers(gl) {
     return {
         position: positionBuffer,
         color: colorBuffer,
+        normal: normalBuffer,
         indices: indexBuffer
     };
 }
@@ -140,7 +210,7 @@ function loadShader(gl, type, source) {
     gl.compileShader(shader);
 
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.log(gl.getShaderInfoLog(shader));
+        console.log(type + "\n" + gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
     }
@@ -164,7 +234,7 @@ function initShader(gl, vsf, fsf) {
 }
 
 
-function draw(gl, programInfo, buffers,deltaTime) {
+function draw(gl, programInfo, buffers, deltaTime) {
     gl.clearColor(0, 0, 0, 1.0);
     gl.clearDepth(1.0);
     gl.enable(gl.DEPTH_TEST);
@@ -173,8 +243,6 @@ function draw(gl, programInfo, buffers,deltaTime) {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     let FOV = 45 * Math.PI / 180;
-
-    let aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
     const near = 0.1;
     const far = 1000.0;
     const projM = mat4.create();
@@ -186,22 +254,29 @@ function draw(gl, programInfo, buffers,deltaTime) {
         far);
 
     const view = mat4.create();
+    let cameraPos = [-0.0, 0.0, -6.0];
 
     mat4.translate(view,     // destination matrix
         view,     // matrix to translate
-        [-0.0, 0.0, -6.0]);  // amount to translate
+        cameraPos);  // amount to translate
+
+    // mat4.rotate(view,  // destination matrix
+    //     view,  // matrix to rotate
+    //     cubeRotation,     // amount to rotate in radians
+    //     [1, 1, 1]);       // axis to rotate around (Z)
 
     mat4.rotate(view,  // destination matrix
         view,  // matrix to rotate
-        cubeRotation,     // amount to rotate in radians
-        [0, 0, 1]);       // axis to rotate around (Z)
+        THETA,// amount to rotate in radians
+        [0, 1, 0]);       // axis to rotate around (Y)
+
     mat4.rotate(view,  // destination matrix
         view,  // matrix to rotate
-        cubeRotation * .7,// amount to rotate in radians
-        [0, 1, 0]);       // axis to rotate around (X)
+        PHI,// amount to rotate in radians
+        [1, 0, 0]);       // axis to rotate around (X)
 
     {
-        const numComp = 3
+        const numComp = 3;
         const type = gl.FLOAT;
         const normalize = false;
         const stride = 0;
@@ -221,7 +296,6 @@ function draw(gl, programInfo, buffers,deltaTime) {
         );
     }
 
-
     {
         const numComponents = 4;
         const type = gl.FLOAT;
@@ -240,9 +314,35 @@ function draw(gl, programInfo, buffers,deltaTime) {
             programInfo.attribLocations.vertexColor);
     }
 
+    {
+        const numComp = 3;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+        gl.vertexAttribPointer(
+            programInfo.attribLocations.normal,
+            numComp,
+            type,
+            normalize,
+            stride,
+            offset
+        );
+        gl.enableVertexAttribArray(
+            programInfo.attribLocations.normal
+        );
+    }
+
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
 
     gl.useProgram(programInfo.program);
+    gl.uniformMatrix3fv(
+        programInfo.uniformLocations.cameraPos,
+        false,
+        cameraPos
+    )
     gl.uniformMatrix4fv(
         programInfo.uniformLocations.projectionMatrix,
         false,
